@@ -2,7 +2,7 @@ import argparse
 import collections
 
 import numpy as np
-
+import os
 import torch
 import torch.optim as optim
 from torchvision import transforms
@@ -31,8 +31,12 @@ def main(args=None):
 
     parser.add_argument('--depth', help='Resnet depth, must be one of 18, 34, 50, 101, 152', type=int, default=50)
     parser.add_argument('--epochs', help='Number of epochs', type=int, default=100)
+    parser.add_argument('--models_out', help='The directory to save models', type=str)
 
     parser = parser.parse_args(args)
+
+    if not os.path.exists(parser.models_out):
+        os.makedirs(parser.models_out)
 
     # Create the data loaders
     if parser.dataset == 'coco':
@@ -162,11 +166,11 @@ def main(args=None):
 
         scheduler.step(np.mean(epoch_loss))
 
-        torch.save(retinanet.module, '{}_retinanet_{}.pt'.format(parser.dataset, epoch_num))
+        torch.save(retinanet.module, os.path.join(parser.models_out, '{}_retinanet_{}.pt'.format(parser.dataset, epoch_num)))
 
     retinanet.eval()
 
-    torch.save(retinanet, 'model_final.pt')
+    torch.save(retinanet, os.path.join(parser.models_out, 'model_final.pt'))
 
 
 if __name__ == '__main__':
