@@ -11,6 +11,7 @@ from retinanet import model
 from retinanet.dataloader import CocoDataset, CSVDataset, collater, Resizer, AspectRatioBasedSampler, Augmenter, \
     Normalizer
 from torch.utils.data import DataLoader
+from torch.utils.tensorboard import SummaryWriter
 
 from retinanet import coco_eval
 from retinanet import csv_eval
@@ -23,7 +24,7 @@ print('CUDA available: {}'.format(torch.cuda.is_available()))
 def main(args=None):
     parser = argparse.ArgumentParser(description='Simple training script for training a RetinaNet network.')
 
-    parser.add_argument('--dataset', help='Dataset type, must be one of csv or coco.')
+    parser.add_argument('--dataset', help='Dataset type, must be one of csv or coco.', default='csv')
     parser.add_argument('--coco_path', help='Path to COCO directory')
     parser.add_argument('--csv_train', help='Path to file containing training annotations (see readme)')
     parser.add_argument('--csv_classes', help='Path to file containing class list (see readme)')
@@ -31,6 +32,8 @@ def main(args=None):
 
     parser.add_argument('--depth', help='Resnet depth, must be one of 18, 34, 50, 101, 152', type=int, default=50)
     parser.add_argument('--epochs', help='Number of epochs', type=int, default=100)
+    parser.add_argument('--batch_size', help='Batch size', type=int, default=2)
+    parser.add_argument('--num_workers', help='Number of workers', type=int, default=4)
     parser.add_argument('--models_out', help='The directory to save models', type=str)
 
     parser = parser.parse_args(args)
@@ -70,12 +73,12 @@ def main(args=None):
     else:
         raise ValueError('Dataset type not understood (must be csv or coco), exiting.')
 
-    sampler = AspectRatioBasedSampler(dataset_train, batch_size=2, drop_last=False)
-    dataloader_train = DataLoader(dataset_train, num_workers=3, collate_fn=collater, batch_sampler=sampler)
+    sampler = AspectRatioBasedSampler(dataset_train, batch_size=parser.batch_size, drop_last=False)
+    dataloader_train = DataLoader(dataset_train, num_workers=parser.num_workers, collate_fn=collater, batch_sampler=sampler)
 
     if dataset_val is not None:
         sampler_val = AspectRatioBasedSampler(dataset_val, batch_size=1, drop_last=False)
-        dataloader_val = DataLoader(dataset_val, num_workers=3, collate_fn=collater, batch_sampler=sampler_val)
+        dataloader_val = DataLoader(dataset_val, num_workers=parser.num_workers, collate_fn=collater, batch_sampler=sampler_val)
 
     # Create the model
     if parser.depth == 18:
@@ -110,7 +113,9 @@ def main(args=None):
     retinanet.module.freeze_bn()
 
     print('Num training images: {}'.format(len(dataset_train)))
+    writer = SummaryWriter(log_dir="tensor_log/" + parser.models_out)
 
+    global_steps = 0
     for epoch_num in range(parser.epochs):
 
         retinanet.train()
@@ -142,10 +147,15 @@ def main(args=None):
 
                 epoch_loss.append(float(loss))
 
+                running_loss = np.mean(loss_hist)
                 print(
                     'Epoch: {} | Iteration: {} | Classification loss: {:1.5f} | Regression loss: {:1.5f} | Running loss: {:1.5f}'.format(
-                        epoch_num, iter_num, float(classification_loss), float(regression_loss), np.mean(loss_hist)))
-
+                        epoch_num, iter_num, float(classification_loss), float(regression_loss), running_loss))
+                global_steps += 1
+                writer.add_scalar("Loss/Classification", float(classification_loss), global_steps)
+                writer.add_scalar("Loss/Regression", float(regression_loss), global_steps)
+                writer.add_scalar("Loss/Running", running_loss, global_steps)
+                
                 del classification_loss
                 del regression_loss
             except Exception as e:
@@ -163,6 +173,8 @@ def main(args=None):
             print('Evaluating dataset')
 
             mAP = csv_eval.evaluate(dataset_val, retinanet)
+            #for k, v in mAP.items():
+            #    writer.add_scalar("Accuracy/map_{}".format(k), v, epoch_num)
 
         scheduler.step(np.mean(epoch_loss))
 

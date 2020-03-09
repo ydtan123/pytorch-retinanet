@@ -4,6 +4,7 @@ import numpy as np
 import torchvision
 import time
 import os
+import shutil
 import copy
 import logging
 import pdb
@@ -16,6 +17,7 @@ import cv2
 import torch
 from pathlib import Path
 from torch.utils.data import Dataset, DataLoader
+
 from torchvision import datasets, models, transforms
 
 from retinanet.dataloader import CocoDataset, CSVDataset, collater, Resizer, AspectRatioBasedSampler, Augmenter, \
@@ -72,9 +74,9 @@ def draw_caption(image, box, caption):
 
     b = np.array(box).astype(int)
     if b[1] <= 10:
-        y = b[1] + 11
+        y = b[3] + 11
     else:
-        y = b[1] - 10
+        y = b[1] - 1
     cv2.putText(image, caption, (b[0], y), cv2.FONT_HERSHEY_PLAIN, 1, (255, 0, 0), 1)
 #    cv2.putText(image, caption, (b[0], b[1] + 10), cv2.FONT_HERSHEY_PLAIN, 1, (255, 255, 255), 1)
     cv2.rectangle(image, (b[0], b[1]), (b[2], b[3]), color=(0,0,255), thickness=1)
@@ -105,6 +107,13 @@ def draw_boxes(img, bb_groups):
         for b in g:
             draw_caption(img, b[1:], b[0])
 
+
+def write_results(logf, results):
+    results.sort(key=lambda x: x[2])
+    with open(logf, "w") as lf:
+        for r in results:
+            lf.write("{:30s}, {:30s}, {}\n".format(r[0], r[1], r[2]))
+            
                          
 def main(args=None):
     parser = argparse.ArgumentParser(description='Simple training script for training a RetinaNet network.')
@@ -126,9 +135,10 @@ def main(args=None):
     else:
         raise ValueError('Dataset type not understood (must be csv or coco), exiting.')
 
-    if not os.path.exists(parser.output):
-        os.makedirs(os.path.join(parser.output, "pass"))
-        os.makedirs(os.path.join(parser.output, "fail"))
+    if os.path.exists(parser.output):
+        shutil.rmtree(parser.output)
+    os.makedirs(os.path.join(parser.output, "pass"))
+    os.makedirs(os.path.join(parser.output, "fail"))
                     
 
     sampler_val = AspectRatioBasedSampler(dataset_val, batch_size=1, drop_last=False)
@@ -147,6 +157,8 @@ def main(args=None):
 
     matched = 0
     not_matched = 0
+    failed = []
+    passed = []
     for idx, data in enumerate(dataloader_val):
         with torch.no_grad():
             st = time.time()
@@ -184,18 +196,22 @@ def main(args=None):
             bb_group_truth = group_by_y(labels_truth)
             strings_found = '-'.join([''.join([str(c[0]) for c in l]) for l in bb_groups_filtered])
             strings_truth = '-'.join([''.join([str(c[0]) for c in l]) for l in bb_group_truth])
+            img_name = Path(data['image_name'][0]).name
             if strings_truth == strings_found:
                 result = 'pass'
                 matched += 1
+                passed.append((strings_found, strings_truth, img_name))
             else:
                 result = 'fail'
                 not_matched += 1
-            img_name = Path(data['image_name'][0]).name
+                failed.append((strings_found, strings_truth, img_name))
             total = matched + not_matched
             print("{:15s}: Found: {}, Truth: {}, {}, {}/{}={:5.2f}".format(
                 result, strings_found, strings_truth, img_name, matched, total, matched / float(total))) 
             
             cv2.imwrite(os.path.join(parser.output, result, img_name), img)
-
+    write_results(os.path.join(parser.output, "fail.log"), failed)
+    write_results(os.path.join(parser.output, "pass.log"), passed)
+    
 if __name__ == '__main__':
     main()

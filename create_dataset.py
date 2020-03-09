@@ -118,4 +118,4 @@ if __name__ == '__main__':
         file_info[args["tests"] + args["validation"]:])
 
     print("Orgin Images: {}, Dup: {}, Labeled Images: {}, Train:{}, Test:{}, val:{}"
-        .format(total_count, repeated, label_count, total_count - args["tests"] - args["validation"], args["tests"], args["validation"]))
+        .format(total_count, repeated, label_count, label_count - args["tests"] - args["validation"], args["tests"], args["validation"]))
